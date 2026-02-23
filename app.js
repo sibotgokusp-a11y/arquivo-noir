@@ -9,6 +9,76 @@ let catalogData = [];
 let currentMangaId = null;
 
 // =========================================
+// SISTEMA DE AUTENTICAÇÃO E LOGIN
+// =========================================
+
+async function checkSession() {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    updateUIForUser(session?.user);
+
+    supabaseClient.auth.onAuthStateChange((_event, session) => {
+        updateUIForUser(session?.user);
+    });
+}
+
+function updateUIForUser(user) {
+    currentUser = user;
+    const btnUpload = document.getElementById('btn-novo-dossie');
+    const btnLogin = document.getElementById('btn-login');
+
+    if (user) {
+        if(btnUpload) btnUpload.classList.remove('hidden');
+        if(btnLogin) btnLogin.innerText = 'Sair';
+    } else {
+        if(btnUpload) btnUpload.classList.add('hidden');
+        if(btnLogin) btnLogin.innerText = 'Login';
+    }
+}
+
+function openLoginModal() {
+    if (currentUser) {
+        supabaseClient.auth.signOut();
+        alert("Sessão encerrada com segurança.");
+    } else {
+        document.getElementById('loginModal').classList.remove('hidden');
+    }
+}
+
+function closeLoginModal() {
+    document.getElementById('loginModal').classList.add('hidden');
+}
+
+async function processLogin() {
+    const email = document.getElementById('login-email').value.trim();
+    const pass = document.getElementById('login-password').value.trim();
+
+    if (!email || !pass) { alert("Preencha e-mail e senha!"); return; }
+
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pass });
+
+    if (error) {
+        if (error.message.includes('Invalid login credentials')) {
+            const confirmSignUp = confirm("Conta não encontrada. Deseja registrar este e-mail como Administrador?");
+            if (confirmSignUp) {
+                const { error: signUpError } = await supabaseClient.auth.signUp({ email, password: pass });
+                if (signUpError) alert("Erro ao criar conta: " + signUpError.message);
+                else {
+                    alert("Conta criada com sucesso! Você já está logado.");
+                    closeLoginModal();
+                }
+            }
+        } else {
+            alert("Erro de acesso: " + error.message);
+        }
+    } else {
+        alert("Acesso concedido.");
+        closeLoginModal();
+    }
+}
+
+checkSession();
+
+// =========================================
 // 2. BUSCAR DADOS DA NUVEM (NOVO CÉREBRO)
 // =========================================
 async function fetchCatalog() {
