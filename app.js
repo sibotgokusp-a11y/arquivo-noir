@@ -1,97 +1,26 @@
-// CONFIGURAÇÃO SUPABASE
-const SUPABASE_URL = 'https://xjjhrsazuzexzkbqrpkj.supabase.co';
-const SUPABASE_KEY = 'sb_publishable_ejXl0bF0P9ivWe6HhFIW2A_RR09ISke';
-const supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+// =========================================
+// BANCO DE DADOS & ESTADO
+// =========================================
+let catalogData = [
+    {
+        category: "Seu Acervo",
+        items: [
+            { 
+                id: 'm1', 
+                title: 'Guia de Operação (Demo)', 
+                img: 'https://images.unsplash.com/photo-1614729939124-032f0b56c9ce?w=400', 
+                meta: 'Leitura Teste', 
+                desc: 'Use o botão "Novo Dossiê" no topo para carregar seus próprios arquivos de imagem do computador.',
+                pages: [
+                    'https://images.unsplash.com/photo-1544281146-5ba8908f5125?w=800',
+                    'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800'
+                ]
+            }
+        ]
+    }
+];
 
-let catalogData = [];
 let currentMangaId = null;
-
-// =========================================
-// BANCO DE DADOS (SUPABASE)
-// =========================================
-
-// Busca os mangás do banco ao carregar a página
-async function fetchCatalog() {
-    const { data, error } = await supabase
-        .from('mangas_db') // Precisaremos criar essa tabela, ou o código criará dinamicamente se configurado
-        .select('*');
-    
-    if (error) {
-        console.error("Erro ao carregar catálogo:", error);
-        return;
-    }
-
-    // Organiza os dados por categoria para o layout do site
-    const organized = {};
-    data.forEach(item => {
-        if (!organized[item.category]) organized[item.category] = [];
-        organized[item.category].push(item);
-    });
-
-    catalogData = Object.keys(organized).map(cat => ({
-        category: cat,
-        items: organized[cat]
-    }));
-
-    renderCatalog();
-}
-
-// =========================================
-// UPLOAD DE IMAGENS (STORAGE)
-// =========================================
-async function processUpload() {
-    const title = document.getElementById('up-title').value.trim() || 'Dossiê Desconhecido';
-    const category = document.getElementById('up-category').value.trim() || 'Acervo Geral';
-    const files = document.getElementById('up-files').files;
-
-    if (files.length === 0) { alert('Selecione imagens!'); return; }
-
-    const statusMsg = document.getElementById('up-count');
-    statusMsg.innerText = "Enviando para a nuvem... aguarde.";
-
-    const folderName = `manga_${Date.now()}`;
-    const pageUrls = [];
-
-    // Faz o upload de cada imagem para o Storage do Supabase
-    for (let i = 0; i < files.length; i++) {
-        const file = files[i];
-        const filePath = `${folderName}/page_${i}.${file.name.split('.').pop()}`;
-        
-        const { data, error } = await supabase.storage
-            .from('mangas')
-            .upload(filePath, file);
-
-        if (error) {
-            console.error("Erro no upload:", error);
-            continue;
-        }
-
-        // Pega a URL pública da imagem
-        const { data: urlData } = supabase.storage
-            .from('mangas')
-            .getPublicUrl(filePath);
-            
-        pageUrls.push(urlData.publicUrl);
-    }
-
-    // Salva as informações no Banco de Dados (Tabela)
-    const { error: dbError } = await supabase
-        .from('mangas_db')
-        .insert([{
-            title: title,
-            category: category,
-            img: pageUrls[0], // Primeira imagem é a capa
-            pages: pageUrls,
-            desc: 'Arquivo salvo na nuvem.'
-        }]);
-
-    if (dbError) {
-        alert("Erro ao salvar no banco de dados.");
-    } else {
-        alert("Dossiê sincronizado com sucesso!");
-        location.reload(); // Recarrega para mostrar o novo item
-    }
-}
 
 // =========================================
 // RENDERIZAÇÃO E PROGRESSO
