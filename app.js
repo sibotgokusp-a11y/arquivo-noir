@@ -1,29 +1,52 @@
 // =========================================
-// BANCO DE DADOS & ESTADO
+// 1. CONFIGURAÇÃO SUPABASE (NUVEM)
 // =========================================
-let catalogData = [
-    {
-        category: "Seu Acervo",
-        items: [
-            { 
-                id: 'm1', 
-                title: 'Guia de Operação (Demo)', 
-                img: 'https://images.unsplash.com/photo-1614729939124-032f0b56c9ce?w=400', 
-                meta: 'Leitura Teste', 
-                desc: 'Use o botão "Novo Dossiê" no topo para carregar seus próprios arquivos de imagem do computador.',
-                pages: [
-                    'https://images.unsplash.com/photo-1544281146-5ba8908f5125?w=800',
-                    'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=800'
-                ]
-            }
-        ]
-    }
-];
+const SUPABASE_URL = 'https://xjjhrsazuzexzkbqrpkj.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_ejXl0bF0P9ivWe6HhFIW2A_RR09ISke';
+const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+let catalogData = [];
 let currentMangaId = null;
 
 // =========================================
-// RENDERIZAÇÃO E PROGRESSO
+// 2. BUSCAR DADOS DA NUVEM (NOVO CÉREBRO)
+// =========================================
+async function fetchCatalog() {
+    const { data, error } = await supabaseClient
+        .from('mangas_db')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+    if (error) {
+        console.error("Erro ao buscar dados na nuvem:", error);
+        return;
+    }
+
+    // Organiza os dados que vieram do banco para o formato que o seu visual espera
+    const organized = {};
+    data.forEach(item => {
+        const cat = item.category || 'Acervo Geral';
+        if (!organized[cat]) organized[cat] = [];
+        organized[cat].push({
+            id: item.id,
+            title: item.title,
+            img: item.img,
+            meta: `${item.pages ? item.pages.length : 0} Páginas`,
+            desc: item.description || item.desc || 'Arquivo armazenado no servidor central.',
+            pages: item.pages || []
+        });
+    });
+
+    catalogData = Object.keys(organized).map(cat => ({
+        category: cat,
+        items: organized[cat]
+    }));
+
+    renderCatalog();
+}
+
+// =========================================
+// 3. RENDERIZAÇÃO E PROGRESSO (SEU CÓDIGO)
 // =========================================
 function getProgress(id) { return parseInt(localStorage.getItem('prog_' + id)) || 0; }
 function saveProgress(id, index) { localStorage.setItem('prog_' + id, index); renderCatalog(); }
@@ -32,7 +55,6 @@ function renderCatalog() {
     const container = document.getElementById('catalog-content');
     container.innerHTML = '';
     
-    // Atualiza o Autocomplete das categorias no Modal de Upload
     const datalist = document.getElementById('existing-categories');
     if(datalist) datalist.innerHTML = '';
     
@@ -82,7 +104,7 @@ function switchView(viewName) {
 }
 
 // =========================================
-// MODAIS E UPLOAD (SISTEMA DE CATEGORIAS)
+// 4. MODAIS E UPLOAD (CONECTADO À NUVEM)
 // =========================================
 function openModal(id) {
     const manga = catalogData.flatMap(row => row.items).find(m => m.id === id); 
@@ -97,7 +119,6 @@ function openModal(id) {
 }
 
 function closeModal(e, modalId) {
-    // Fecha se clicar fora do modal ou no botão com o X
     if (e.target.id === modalId || e.target.closest('button')) {
         document.getElementById(modalId).classList.remove('active');
     }
@@ -107,74 +128,89 @@ function openUploadModal() {
     document.getElementById('uploadModal').classList.add('active'); 
 }
 
-document.getElementById('up-files').addEventListener('change', function(e) {
-    const count = e.target.files.length;
-    document.getElementById('up-count').innerText = count > 0 ? `${count} arquivos selecionados.` : '';
-});
+// Atualiza o contador de arquivos selecionados
+const upFilesEl = document.getElementById('up-files');
+if(upFilesEl) {
+    upFilesEl.addEventListener('change', function(e) {
+        const count = e.target.files.length;
+        document.getElementById('up-count').innerText = count > 0 ? `${count} arquivos selecionados.` : '';
+    });
+}
 
-function processUpload() {
-    // 1. Verifica os campos de texto
+// O NOVO PROCESSO DE UPLOAD
+async function processUpload() {
     const titleEl = document.getElementById('up-title');
     const categoryEl = document.getElementById('up-category');
-    
-    if (!titleEl) { alert("ERRO: Campo de título não encontrado no HTML!"); return; }
+    const filesEl = document.getElementById('up-files');
+    const statusMsg = document.getElementById('up-count');
     
     const title = titleEl.value.trim() || 'Dossiê Desconhecido';
     const finalCategory = (categoryEl && categoryEl.value.trim()) ? categoryEl.value.trim() : 'Acervo Geral';
     
-    // 2. Verifica os arquivos
-    const filesEl = document.getElementById('up-files');
     if (!filesEl || filesEl.files.length === 0) { 
         alert('Selecione uma pasta com imagens primeiro!'); 
         return; 
     }
 
-    const files = filesEl.files;
-    
-    // 3. Filtra para pegar SOMENTE imagens
-    const imageFiles = Array.from(files)
+    const imageFiles = Array.from(filesEl.files)
         .filter(file => file.type.startsWith('image/'))
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
     if (imageFiles.length === 0) { 
-        alert(`Nenhuma imagem detectada! Você selecionou ${files.length} arquivos, mas nenhum é formato de imagem (JPG, PNG).`); 
+        alert(`Nenhuma imagem detectada!`); 
         return; 
     }
 
-    // 4. Cria o mangá
-    const pagesUrls = imageFiles.map(file => URL.createObjectURL(file));
+    // Muda a mensagem para mostrar que está enviando para a nuvem
+    if(statusMsg) statusMsg.innerText = "Sincronizando com os servidores... (Isso pode demorar dependendo das imagens)";
 
-    const newItem = {
-        id: 'm_' + Date.now(), 
-        title: title, 
-        img: pagesUrls[0],
-        meta: `${pagesUrls.length} Páginas`, 
-        desc: 'Arquivo importado localmente.', 
-        pages: pagesUrls
-    };
+    const folderName = `manga_${Date.now()}`;
+    const pageUrls = [];
 
-    let categoryRow = catalogData.find(row => row.category.toLowerCase() === finalCategory.toLowerCase());
-    
-    if (categoryRow) {
-        categoryRow.items.unshift(newItem);
-    } else {
-        catalogData.unshift({ category: finalCategory, items: [newItem] });
+    try {
+        // 1. Sobe as imagens para o Storage
+        for (let i = 0; i < imageFiles.length; i++) {
+            const file = imageFiles[i];
+            const fileName = `page_${i}.${file.name.split('.').pop()}`;
+            const filePath = `${folderName}/${fileName}`;
+            
+            const { error } = await supabaseClient.storage.from('mangas').upload(filePath, file);
+            if (error) throw error;
+
+            const { data: urlData } = supabaseClient.storage.from('mangas').getPublicUrl(filePath);
+            pageUrls.push(urlData.publicUrl);
+        }
+
+        // 2. Salva os dados no Banco de Dados
+        const { error: dbError } = await supabaseClient.from('mangas_db').insert([{
+            title: title,
+            category: finalCategory,
+            img: pageUrls[0],
+            pages: pageUrls,
+            description: 'Arquivo importado para a nuvem.'
+        }]);
+
+        if (dbError) throw dbError;
+
+        // 3. Limpa a tela e recarrega
+        titleEl.value = '';
+        if(categoryEl) categoryEl.value = '';
+        filesEl.value = '';
+        if(statusMsg) statusMsg.innerText = '';
+        document.getElementById('uploadModal').classList.remove('active');
+        
+        alert("Dossiê registrado com sucesso na NUVEM!");
+        fetchCatalog(); // Busca os dados novos sem precisar de F5
+
+    } catch (err) {
+        console.error(err);
+        alert("Erro no upload para a nuvem: " + err.message);
+        if(statusMsg) statusMsg.innerText = "Falha na sincronização.";
     }
-
-    // 5. Salva e Limpa a tela
-    renderCatalog();
-    
-    titleEl.value = '';
-    if(categoryEl) categoryEl.value = '';
-    filesEl.value = '';
-    document.getElementById('up-count').innerText = '';
-    document.getElementById('uploadModal').classList.remove('active');
-    
-    alert("Dossiê registrado com sucesso!");
 }
 
 // =========================================
-// LEITOR PREMIUM (READER)
+// 5. LEITOR PREMIUM (SEU CÓDIGO)
 // =========================================
 const readerState = {
     pages: [], currentIndex: 0,
@@ -282,9 +318,6 @@ function toggleFullscreen() {
     else document.exitFullscreen();
 }
 
-// =========================================
-// EVENTOS E CONFIGURAÇÕES
-// =========================================
 function toggleSettings() { 
     document.getElementById('settingsPanel').classList.toggle('active'); 
 }
@@ -309,74 +342,64 @@ document.addEventListener('keydown', (e) => {
 });
 
 // =========================================
-// CARROSSEL DO HERO BANNER (NETFLIX STYLE)
+// 6. CARROSSEL DO HERO BANNER (SEU CÓDIGO)
 // =========================================
 let heroInterval;
 let currentHeroIndex = 0;
 
 function startHeroCarousel() {
-    // Pega todos os itens do catálogo e junta num array só (adicionando o nome da categoria a eles)
     const allItems = catalogData.flatMap(row => row.items.map(item => ({ ...item, categoryName: row.category })));
-    
-    // Se não tiver mangá, não faz nada
     if (allItems.length === 0) return;
 
-    // Pega os 5 primeiros mangás (ou os mais recentes) para girar no banner
     const heroItems = allItems.slice(0, 5);
 
     const updateHero = () => {
         const item = heroItems[currentHeroIndex];
-        
         const imgContainer = document.getElementById('hero-img-container');
         const contentContainer = document.getElementById('hero-content');
         const bgImg = document.getElementById('hero-bg');
 
-        // 1. Apaga tudo suavemente (Fade out)
         imgContainer.classList.remove('opacity-100');
         imgContainer.classList.add('opacity-0');
         contentContainer.classList.remove('opacity-100');
         contentContainer.classList.add('opacity-0');
 
-        // 2. Espera ficar escuro, troca os dados e acende de novo
         setTimeout(() => {
             bgImg.src = item.img;
             document.getElementById('hero-title').innerText = item.title;
             document.getElementById('hero-desc').innerText = item.desc || 'Sem descrição disponível nos arquivos.';
             document.getElementById('hero-tag').innerText = item.categoryName;
 
-            // Conecta os botões ao mangá atual
             document.getElementById('hero-btn-details').onclick = () => openModal(item.id);
             document.getElementById('hero-btn-read').onclick = () => {
                 currentMangaId = item.id;
                 openReader();
             };
 
-            // Reinicia a animação de zoom lento da imagem
             bgImg.classList.remove('scale-110');
-            void bgImg.offsetWidth; // Força o navegador a reiniciar a animação
+            void bgImg.offsetWidth; 
             bgImg.classList.add('scale-110');
 
-            // Fade In (Acende)
             imgContainer.classList.remove('opacity-0');
             imgContainer.classList.add('opacity-100');
             contentContainer.classList.remove('opacity-0');
             contentContainer.classList.add('opacity-100');
 
-            // Prepara o próximo mangá para daqui a pouco
             currentHeroIndex = (currentHeroIndex + 1) % heroItems.length;
-        }, 700); // 700ms é o tempo do fade out
+        }, 700);
     };
 
-    // Roda a primeira vez na hora
     updateHero();
 
-    // Limpa o timer antigo (se existir) e cria um novo a cada 8 segundos
     if (heroInterval) clearInterval(heroInterval);
     heroInterval = setInterval(updateHero, 8000);
 }
 
-// Inicialização
-renderCatalog();
+// =========================================
+// INICIALIZAÇÃO
+// =========================================
 if (localStorage.getItem('arquivo_theme')) {
     document.documentElement.setAttribute('data-theme', localStorage.getItem('arquivo_theme'));
 }
+// Aciona o Supabase assim que a página carrega
+window.onload = fetchCatalog;
