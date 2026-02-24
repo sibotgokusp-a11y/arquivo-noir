@@ -14,68 +14,80 @@ let currentMangaId = null;
 
 async function checkSession() {
     const { data: { session } } = await supabaseClient.auth.getSession();
-    updateUIForUser(session?.user);
+    handleAuthState(session?.user);
 
     supabaseClient.auth.onAuthStateChange((_event, session) => {
-        updateUIForUser(session?.user);
+        handleAuthState(session?.user);
     });
 }
 
-function updateUIForUser(user) {
+function handleAuthState(user) {
     currentUser = user;
+    const loginScreen = document.getElementById('loginModal');
+    const appNav = document.getElementById('main-nav');
     const btnUpload = document.getElementById('btn-novo-dossie');
     const btnLogin = document.getElementById('btn-login');
 
     if (user) {
+        // Usuário logado: libera o acesso e carrega os dados
+        loginScreen.classList.add('hidden');
+        appNav.style.display = 'flex';
         if(btnUpload) btnUpload.classList.remove('hidden');
         if(btnLogin) btnLogin.innerText = 'Sair';
+        
+        // Busca os dados APENAS se estiver logado
+        fetchCatalog();
     } else {
-        if(btnUpload) btnUpload.classList.add('hidden');
-        if(btnLogin) btnLogin.innerText = 'Login';
+        // Visitante/Logout: bloqueia tudo
+        loginScreen.classList.remove('hidden');
+        appNav.style.display = 'none';
+        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+        
+        // Limpa os dados do DOM por segurança
+        document.getElementById('catalog-content').innerHTML = '';
+        catalogData = [];
     }
-}
-
-function openLoginModal() {
-    if (currentUser) {
-        supabaseClient.auth.signOut();
-        alert("Sessão encerrada com segurança.");
-    } else {
-        document.getElementById('loginModal').classList.remove('hidden');
-    }
-}
-
-function closeLoginModal() {
-    document.getElementById('loginModal').classList.add('hidden');
 }
 
 async function processLogin() {
     const email = document.getElementById('login-email').value.trim();
     const pass = document.getElementById('login-password').value.trim();
+    const btn = document.getElementById('btn-submit-login');
 
-    if (!email || !pass) { alert("Preencha e-mail e senha!"); return; }
+    if (!email || !pass) { 
+        alert("Preencha as credenciais completas."); 
+        return; 
+    }
 
+    const originalText = btn.innerText;
+    btn.innerText = "Verificando...";
+    btn.disabled = true;
+
+    // Login simples. A criação de conta foi removida do frontend.
     const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password: pass });
 
+    btn.innerText = originalText;
+    btn.disabled = false;
+
     if (error) {
-        if (error.message.includes('Invalid login credentials')) {
-            const confirmSignUp = confirm("Conta não encontrada. Deseja registrar este e-mail como Administrador?");
-            if (confirmSignUp) {
-                const { error: signUpError } = await supabaseClient.auth.signUp({ email, password: pass });
-                if (signUpError) alert("Erro ao criar conta: " + signUpError.message);
-                else {
-                    alert("Conta criada com sucesso! Você já está logado.");
-                    closeLoginModal();
-                }
-            }
-        } else {
-            alert("Erro de acesso: " + error.message);
-        }
+        alert("Acesso negado: Credenciais inválidas ou sem permissão.");
     } else {
-        alert("Acesso concedido.");
-        closeLoginModal();
+        document.getElementById('login-email').value = '';
+        document.getElementById('login-password').value = '';
+        // O handleAuthState será chamado automaticamente pelo onAuthStateChange
     }
 }
 
+function openLoginModal() {
+    if (currentUser) {
+        const confirmar = confirm("Deseja trancar os arquivos e sair do sistema?");
+        if (confirmar) {
+            supabaseClient.auth.signOut();
+        }
+    }
+}
+
+// Inicia a verificação de sessão (O checkSession cuida de mostrar o login ou o catálogo)
 checkSession();
 
 // =========================================
@@ -471,5 +483,3 @@ function startHeroCarousel() {
 if (localStorage.getItem('arquivo_theme')) {
     document.documentElement.setAttribute('data-theme', localStorage.getItem('arquivo_theme'));
 }
-// Aciona o Supabase assim que a página carrega
-window.onload = fetchCatalog;

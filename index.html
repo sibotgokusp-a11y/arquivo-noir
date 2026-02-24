@@ -249,23 +249,24 @@
     </div>
 
     <div id="loginModal"
-        class="hidden fixed inset-0 bg-black/90 z-50 flex justify-center items-center backdrop-blur-sm transition-opacity duration-300">
-        <div class="bg-surface p-8 rounded-lg max-w-md w-full mx-4 border border-white/10 shadow-2xl">
-            <h2 class="font-title text-2xl font-bold mb-6 text-white flex items-center gap-2">
+        class="fixed inset-0 bg-black z-[2000] flex justify-center items-center backdrop-blur-md transition-opacity duration-300">
+        <div
+            class="bg-surface p-8 rounded-lg max-w-md w-full mx-4 border border-accent/50 shadow-[0_0_40px_rgba(139,30,30,0.15)]">
+            <h2 class="font-title text-2xl font-bold mb-2 text-white flex items-center gap-2">
                 <span class="w-2 h-6 bg-accent rounded-full"></span>
                 Acesso Restrito
             </h2>
-            <input type="email" id="login-email" placeholder="Seu E-mail"
-                class="w-full mb-4 p-3 bg-black/50 border border-white/10 rounded text-white focus:border-accent outline-none">
-            <input type="password" id="login-password" placeholder="Sua Senha"
-                class="w-full mb-6 p-3 bg-black/50 border border-white/10 rounded text-white focus:border-accent outline-none">
+            <p class="text-secondary text-sm mb-6">O Arquivo Noir é confidencial. Insira suas credenciais de
+                administrador.</p>
 
-            <button onclick="processLogin()"
-                class="w-full bg-accent text-white font-bold py-3 rounded hover:bg-red-700 transition-colors mb-4">
-                Entrar / Criar Conta
-            </button>
-            <button onclick="closeLoginModal()" class="w-full text-gray-400 hover:text-white transition-colors text-sm">
-                Cancelar
+            <input type="email" id="login-email" placeholder="Credencial (E-mail)"
+                class="w-full mb-4 p-3 bg-black/50 border border-white/10 rounded text-white focus:border-accent outline-none font-ui">
+            <input type="password" id="login-password" placeholder="Código de Acesso (Senha)"
+                class="w-full mb-6 p-3 bg-black/50 border border-white/10 rounded text-white focus:border-accent outline-none font-ui">
+
+            <button onclick="processLogin()" id="btn-submit-login"
+                class="w-full bg-accent text-white font-bold py-3 rounded hover:bg-accent-hover transition-colors shadow-lg">
+                Autenticar
             </button>
         </div>
     </div>
