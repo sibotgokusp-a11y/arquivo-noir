@@ -90,8 +90,41 @@ function openLoginModal() {
 // Inicia a verificação de sessão (O checkSession cuida de mostrar o login ou o catálogo)
 checkSession();
 
+
+// =========================================
+// HELPER: GERAR URLs ASSINADAS (SEGURANÇA MAX)
+// =========================================
+async function getSignedUrls(paths) {
+    if (!paths || paths.length === 0) return [];
+    
+    // Filtra caminhos reais. Ignora se já for um link http (fallback de arquivos antigos)
+    const cleanPaths = paths.filter(p => p && !p.startsWith('http'));
+    const oldUrls = paths.filter(p => p && p.startsWith('http'));
+
+    if (cleanPaths.length === 0) return oldUrls;
+
+    // Pede ao Supabase links temporários que duram 1 hora (3600 segundos)
+    const { data, error } = await supabaseClient.storage.from('mangas').createSignedUrls(cleanPaths, 3600);
+    
+    if (error) {
+        console.error("Erro ao descriptografar URLs:", error);
+        return paths;
+    }
+
+    // Mapeia os resultados
+    const signedMap = {};
+    data.forEach(item => {
+        if (!item.error) signedMap[item.path] = item.signedUrl;
+    });
+
+    // Retorna a lista na ordem original
+    return paths.map(p => signedMap[p] || p);
+}
 // =========================================
 // 2. BUSCAR DADOS DA NUVEM (NOVO CÉREBRO)
+// =========================================
+// =========================================
+// 2. BUSCAR DADOS DA NUVEM
 // =========================================
 async function fetchCatalog() {
     const { data, error } = await supabaseClient
@@ -104,27 +137,49 @@ async function fetchCatalog() {
         return;
     }
 
-    // Organiza os dados que vieram do banco para o formato que o seu visual espera
+    // Pega todas as capas para gerar links temporários de uma vez
+    const coverPaths = data.map(item => item.img).filter(p => p && !p.startsWith('http'));
+    let signedCovers = {};
+    
+    if (coverPaths.length > 0) {
+        const { data: signedData } = await supabaseClient.storage.from('mangas').createSignedUrls(coverPaths, 3600);
+        if (signedData) {
+            signedData.forEach(item => { if (!item.error) signedCovers[item.path] = item.signedUrl; });
+        }
+    }
+
     const organized = {};
     data.forEach(item => {
         const cat = item.category || 'Acervo Geral';
         if (!organized[cat]) organized[cat] = [];
+        
+        // Usa o link assinado se existir, senão usa o original
+        const finalCoverUrl = item.img?.startsWith('http') ? item.img : (signedCovers[item.img] || item.img);
+
         organized[cat].push({
             id: item.id,
             title: item.title,
-            img: item.img,
+            img: finalCoverUrl,
             meta: `${item.pages ? item.pages.length : 0} Páginas`,
-            desc: item.description || item.desc || 'Arquivo armazenado no servidor central.',
-            pages: item.pages || []
+            desc: item.description || item.desc || 'Arquivo confidencial.',
+            rawPages: item.pages || [] // Guarda os caminhos para o Leitor Premium usar depois
         });
     });
 
-    catalogData = Object.keys(organized).map(cat => ({
-        category: cat,
-        items: organized[cat]
-    }));
-
+    catalogData = Object.keys(organized).map(cat => ({ category: cat, items: organized[cat] }));
     renderCatalog();
+}
+
+function openModal(id) {
+    const manga = catalogData.flatMap(row => row.items).find(m => m.id === id); 
+    if(!manga) return;
+    
+    currentMangaId = id;
+    document.getElementById('modalImg').src = manga.img;
+    document.getElementById('modalTitle').innerText = manga.title;
+    document.getElementById('modalMeta').innerText = manga.meta || `${manga.rawPages.length} Páginas`;
+    document.getElementById('modalDesc').innerText = manga.desc;
+    document.getElementById('itemModal').classList.add('active');
 }
 
 // =========================================
@@ -199,7 +254,67 @@ function openModal(id) {
     document.getElementById('modalDesc').innerText = manga.desc;
     document.getElementById('itemModal').classList.add('active');
 }
+// =========================================
+// EXCLUIR DOSSIÊ (STORAGE + BANCO DE DADOS)
+// =========================================
+async function deleteManga() {
+    if (!currentMangaId) return;
 
+    // Confirmação de segurança dupla
+    const confirmDelete = confirm("ALERTA MÁXIMO: Tem certeza que deseja incinerar este dossiê?\n\nIsso apagará todas as imagens do servidor e o registro no banco de dados. Esta ação é irreversível.");
+    if (!confirmDelete) return;
+
+    // Busca as informações do dossiê atual na memória
+    const manga = catalogData.flatMap(row => row.items).find(m => m.id === currentMangaId);
+    if (!manga) return;
+
+    const btn = document.getElementById('btn-delete-manga');
+    const originalText = btn.innerHTML;
+    
+    try {
+        btn.innerHTML = `<span class="material-symbols-outlined align-middle mr-1">hourglass_empty</span> Incinerando...`;
+        btn.disabled = true;
+
+        // 1. Apaga os arquivos do Storage (Bucket)
+        // Pega todos os caminhos de páginas salvos. 
+        const pathsToDelete = [...(manga.rawPages || [])];
+        
+        if (pathsToDelete.length > 0) {
+            const { error: storageError } = await supabaseClient
+                .storage
+                .from('mangas')
+                .remove(pathsToDelete);
+            
+            if (storageError) {
+                console.warn("Aviso ao limpar o Storage:", storageError);
+            }
+        }
+
+        // 2. Apaga o registro do Banco de Dados
+        const { error: dbError } = await supabaseClient
+            .from('mangas_db')
+            .delete()
+            .eq('id', currentMangaId);
+
+        if (dbError) throw dbError;
+
+        // Limpa o progresso salvo localmente
+        localStorage.removeItem('prog_' + currentMangaId);
+
+        alert("Dossiê destruído com sucesso.");
+        
+        // Fecha o modal e recarrega a prateleira
+        document.getElementById('itemModal').classList.remove('active');
+        fetchCatalog();
+
+    } catch (error) {
+        console.error("Erro na exclusão:", error);
+        alert("Erro crítico ao tentar excluir: " + error.message);
+    } finally {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+    }
+}
 function closeModal(e, modalId) {
     if (e.target.id === modalId || e.target.closest('button')) {
         document.getElementById(modalId).classList.remove('active');
@@ -220,6 +335,9 @@ if(upFilesEl) {
 }
 
 // O NOVO PROCESSO DE UPLOAD
+// =========================================
+// O NOVO PROCESSO DE UPLOAD SEGURO
+// =========================================
 async function processUpload() {
     const titleEl = document.getElementById('up-title');
     const categoryEl = document.getElementById('up-category');
@@ -229,28 +347,20 @@ async function processUpload() {
     const title = titleEl.value.trim() || 'Dossiê Desconhecido';
     const finalCategory = (categoryEl && categoryEl.value.trim()) ? categoryEl.value.trim() : 'Acervo Geral';
     
-    if (!filesEl || filesEl.files.length === 0) { 
-        alert('Selecione uma pasta com imagens primeiro!'); 
-        return; 
-    }
+    if (!filesEl || filesEl.files.length === 0) { alert('Selecione uma pasta com imagens primeiro!'); return; }
 
     const imageFiles = Array.from(filesEl.files)
         .filter(file => file.type.startsWith('image/'))
         .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }));
 
-    if (imageFiles.length === 0) { 
-        alert(`Nenhuma imagem detectada!`); 
-        return; 
-    }
+    if (imageFiles.length === 0) { alert(`Nenhuma imagem detectada!`); return; }
 
-    // Muda a mensagem para mostrar que está enviando para a nuvem
-    if(statusMsg) statusMsg.innerText = "Sincronizando com os servidores... (Isso pode demorar dependendo das imagens)";
+    if(statusMsg) statusMsg.innerText = "Criptografando e enviando para o servidor seguro...";
 
     const folderName = `manga_${Date.now()}`;
-    const pageUrls = [];
+    const pagePaths = []; // Agora guardamos o caminho relativo, não a URL inteira
 
     try {
-        // 1. Sobe as imagens para o Storage
         for (let i = 0; i < imageFiles.length; i++) {
             const file = imageFiles[i];
             const fileName = `page_${i}.${file.name.split('.').pop()}`;
@@ -259,34 +369,31 @@ async function processUpload() {
             const { error } = await supabaseClient.storage.from('mangas').upload(filePath, file);
             if (error) throw error;
 
-            const { data: urlData } = supabaseClient.storage.from('mangas').getPublicUrl(filePath);
-            pageUrls.push(urlData.publicUrl);
+            pagePaths.push(filePath);
         }
 
-        // 2. Salva os dados no Banco de Dados
         const { error: dbError } = await supabaseClient.from('mangas_db').insert([{
             title: title,
             category: finalCategory,
-            img: pageUrls[0],
-            pages: pageUrls,
-            description: 'Arquivo importado para a nuvem.'
+            img: pagePaths[0], 
+            pages: pagePaths,
+            description: 'Arquivo classificado importado.'
         }]);
 
         if (dbError) throw dbError;
 
-        // 3. Limpa a tela e recarrega
         titleEl.value = '';
         if(categoryEl) categoryEl.value = '';
         filesEl.value = '';
         if(statusMsg) statusMsg.innerText = '';
         document.getElementById('uploadModal').classList.remove('active');
         
-        alert("Dossiê registrado com sucesso na NUVEM!");
-        fetchCatalog(); // Busca os dados novos sem precisar de F5
+        alert("Dossiê classificado registrado com sucesso!");
+        fetchCatalog(); 
 
     } catch (err) {
         console.error(err);
-        alert("Erro no upload para a nuvem: " + err.message);
+        alert("Erro no upload seguro: " + err.message);
         if(statusMsg) statusMsg.innerText = "Falha na sincronização.";
     }
 }
@@ -306,18 +413,27 @@ const img1 = document.getElementById('reader-img-1');
 const img2 = document.getElementById('reader-img-2');
 const selector = document.getElementById('page-selector');
 
-function openReader() {
+// =========================================
+// LEITOR PREMIUM (COM URLS ASSINADAS)
+// =========================================
+async function openReader() {
     document.getElementById('itemModal').classList.remove('active');
     const manga = catalogData.flatMap(row => row.items).find(m => m.id === currentMangaId);
     
-    readerState.pages = manga.pages;
+    const titleEl = document.getElementById('reader-title');
+    titleEl.innerText = "Descriptografando arquivos..."; // Feedback de loading
+    
+    // Gera as URLs assinadas para o leitor
+    const signedPages = await getSignedUrls(manga.rawPages);
+    
+    readerState.pages = signedPages;
     readerState.currentIndex = getProgress(currentMangaId);
     
-    document.getElementById('reader-title').innerText = manga.title;
-    document.getElementById('total-pages-label').innerText = manga.pages.length;
+    titleEl.innerText = manga.title;
+    document.getElementById('total-pages-label').innerText = manga.rawPages.length;
     
     selector.innerHTML = '';
-    manga.pages.forEach((_, i) => selector.innerHTML += `<option value="${i}">Pág. ${i + 1}</option>`);
+    signedPages.forEach((_, i) => selector.innerHTML += `<option value="${i}">Pág. ${i + 1}</option>`);
 
     setFitMode(readerState.fitMode, false);
     updateSpreadUI();
